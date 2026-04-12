@@ -1,0 +1,4 @@
+src/App.tsx(369,11): error TS2322: Type 'Dispatch<SetStateAction<"dashboard" | "inventory" | "movements" | "units" | "reports" | "ai_analysis" | "user_management">>' is not assignable to type '(tab: string) => void'.
+  Types of parameters 'value' and 'tab' are incompatible.
+    Type 'string' is not assignable to type 'SetStateAction<"dashboard" | "inventory" | "movements" | "units" | "reports" | "ai_analysis" | "user_management">'.
+src/main.tsx(3,15): error TS2614: Module '"./App.tsx"' has no exported member 'ErrorBoundary'. Did you mean to use 'import ErrorBoundary from "./App.tsx"' instead?

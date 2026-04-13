@@ -171,8 +171,7 @@ function App() {
             email: userEmail,
             role: preAuth.role,
             full_name: profile?.full_name || userEmail.split('@')[0],
-            organization: profile?.organization || preAuth.organization || 'Ministère de la Défense',
-            updated_at: new Date().toISOString()
+            organization: profile?.organization || preAuth.organization || 'Ministère de la Défense'
           })
           .select()
           .single();

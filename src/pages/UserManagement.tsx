@@ -31,10 +31,16 @@ export const UserManagement = ({ preAuthorizedUsers, fetchData }: UserManagement
         password: newUser.password,
       });
 
+      let authId = authData?.user?.id;
+
       if (authError) {
         console.error('Auth signUp error:', authError);
-        // Si l'utilisateur existe déjà dans Auth, on continue quand même pour mettre à jour le rôle
-        if (!authError.message.includes('already registered')) {
+        const errorMsg = authError.message.toLowerCase();
+        
+        // Si l'utilisateur existe déjà, ou si les inscriptions sont bloquées par Supabase, on continue
+        if (errorMsg.includes('signups not allowed') || errorMsg.includes('signup is disabled')) {
+          alert("⚠️ Supabase bloque la création de compte automatique.\n\nL'accréditation va être sauvegardée. Vous devrez créer le compte via le bouton vert 'Add user' dans le Dashboard Supabase.");
+        } else if (!errorMsg.includes('already registered')) {
           alert("Erreur lors de la création du compte : " + authError.message);
           return;
         }

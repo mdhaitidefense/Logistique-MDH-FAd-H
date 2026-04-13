@@ -25,48 +25,61 @@ export const UserManagement = ({ preAuthorizedUsers, fetchData }: UserManagement
     }
     
     try {
-      // 1. Création de l'utilisateur dans Supabase Auth (via Edge Function)
-      const { data: authData, error: authError } = await supabase.functions.invoke('create-admin-user', {
-        body: { 
-          email: newUser.email, 
-          password: newUser.password, 
-          role: newUser.role, 
-          organization: newUser.organization 
-        }
+      // 1. Créer le compte Auth via signUp (pas besoin d'Edge Function)
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: newUser.email,
+        password: newUser.password,
       });
 
       if (authError) {
-        console.error('Edge Function Error:', authError);
-        alert("Erreur lors de la création du compte Auth : " + authError.message);
-        return;
+        console.error('Auth signUp error:', authError);
+        // Si l'utilisateur existe déjà dans Auth, on continue quand même pour mettre à jour le rôle
+        if (!authError.message.includes('already registered')) {
+          alert("Erreur lors de la création du compte : " + authError.message);
+          return;
+        }
       }
 
-      // 2. Add to pre-authorized list (backup safety)
+      // 2. Enregistrer/mettre à jour dans pre_authorized_users (source de vérité pour les rôles)
       const { error: preAuthError } = await supabase.from('pre_authorized_users').upsert({
         email: newUser.email,
         role: newUser.role,
         organization: newUser.organization,
-        created_at: new Date().toISOString()
       }, { onConflict: 'email' });
       
-      if (preAuthError) throw preAuthError;
-
-      // 2. Check if user already exists in 'users' table and update their role immediately
-      const { data: existingUser } = await supabase
-        .from('users')
-        .select('id')
-        .ilike('email', newUser.email.trim())
-        .maybeSingle();
-
-      if (existingUser) {
-        await supabase
-          .from('users')
-          .update({ role: newUser.role })
-          .eq('id', existingUser.id);
+      if (preAuthError) {
+        console.error('pre_authorized_users error:', preAuthError);
+        throw preAuthError;
       }
 
+      // 3. Si l'utilisateur a un ID Auth, créer/mettre à jour sa ligne dans users
+      if (authData?.user?.id) {
+        await supabase.from('users').upsert({
+          id: authData.user.id,
+          email: newUser.email,
+          role: newUser.role,
+          full_name: newUser.email.split('@')[0],
+          organization: newUser.organization,
+        });
+      } else {
+        // L'utilisateur existe peut-être déjà — essayer de mettre à jour son rôle
+        const { data: existingUser } = await supabase
+          .from('users')
+          .select('id')
+          .ilike('email', newUser.email.trim())
+          .maybeSingle();
+
+        if (existingUser) {
+          await supabase
+            .from('users')
+            .update({ role: newUser.role, organization: newUser.organization })
+            .eq('id', existingUser.id);
+        }
+      }
+
+      alert("✅ Utilisateur ajouté avec succès !");
       setIsAddingUser(false);
-      setNewUser({ role: 'Officier Logistique', organization: 'Ministère de la Défense' });
+      setNewUser({ role: 'Officier Logistique', organization: 'Ministère de la Défense', password: '' });
       fetchData();
     } catch (error) {
       console.error('Error adding user:', error);

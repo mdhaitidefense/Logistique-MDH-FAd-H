@@ -139,25 +139,25 @@ function App() {
       const { data: { session } } = await supabase.auth.getSession();
       const userEmail = session?.user?.email;
 
-      if (!userEmail) return;
+      if (!userEmail) { setLoading(false); return; }
 
-      // 1. Get current profile
-      const { data: profile, error: profileError } = await supabase
+      // 1. Get current profile from users table
+      const { data: profile } = await supabase
         .from('users')
         .select('*')
         .eq('id', userId)
         .single();
       
       // 2. Get pre-authorized role (case-insensitive email matching)
-      const { data: preAuth, error: preAuthError } = await supabase
+      const { data: preAuth } = await supabase
         .from('pre_authorized_users')
-        .select('role')
+        .select('role, full_name, organization')
         .ilike('email', userEmail.trim())
         .maybeSingle();
 
       let finalProfile = profile;
 
-      // 3. Sync role if needed
+      // 3. Sync role from pre_authorized_users → users table if needed
       if (preAuth && (!profile || profile.role?.trim() !== preAuth.role?.trim())) {
         const { data: updatedProfile, error: updateError } = await supabase
           .from('users')
@@ -165,25 +165,59 @@ function App() {
             id: userId,
             email: userEmail,
             role: preAuth.role,
-            full_name: profile?.full_name || userEmail.split('@')[0],
+            full_name: profile?.full_name || preAuth.full_name || userEmail.split('@')[0],
+            organization: profile?.organization || preAuth.organization || 'Ministère de la Défense',
             updated_at: new Date().toISOString()
           })
           .select()
           .single();
         
-        if (!updateError) {
+        if (!updateError && updatedProfile) {
           finalProfile = updatedProfile;
+        } else if (updateError) {
+          // Upsert failed (RLS or other) — build profile in memory from pre_auth data
+          console.warn('Upsert failed, using pre_auth role directly:', updateError.message);
+          finalProfile = {
+            id: userId,
+            email: userEmail,
+            role: preAuth.role,
+            full_name: profile?.full_name || preAuth.full_name || userEmail.split('@')[0],
+            organization: profile?.organization || preAuth.organization || 'Ministère de la Défense',
+            ...(profile || {}),
+            // override role from pre_auth even if profile exists
+            role: preAuth.role,
+          };
         }
       }
 
       if (finalProfile) {
-        console.log('User profile loaded:', finalProfile);
+        console.log('User profile loaded:', finalProfile.email, '| role:', finalProfile.role);
         setUserProfile(finalProfile);
         if (finalProfile.role !== 'Administrateur' && activeTab === 'user_management') {
           setActiveTab('dashboard');
         }
+      } else if (preAuth) {
+        // Fallback: no users row found, but we know the pre-authorized role
+        const fallbackProfile = {
+          id: userId,
+          email: userEmail,
+          role: preAuth.role,
+          full_name: preAuth.full_name || userEmail.split('@')[0],
+          organization: preAuth.organization || 'Ministère de la Défense',
+        };
+        console.log('Using fallback profile from pre_auth:', fallbackProfile.role);
+        setUserProfile(fallbackProfile as any);
       } else {
-        console.warn('No profile found for user:', userId);
+        // No profile and not pre-authorized → treat as regular user
+        const defaultProfile = {
+          id: userId,
+          email: userEmail,
+          role: 'Consultant',
+          full_name: userEmail.split('@')[0],
+          organization: 'Ministère de la Défense',
+        };
+        console.warn('No pre-auth found for:', userEmail, '— defaulting to Consultant');
+        setUserProfile(defaultProfile as any);
       }
       
       fetchData();
@@ -479,11 +513,8 @@ function App() {
     }
   };
 
-  // Admin if role is set OR if running on localhost for development
-  const isAdmin = 
-    userProfile?.role === 'Administrateur' || 
-    window.location.hostname === 'localhost' || 
-    window.location.hostname === '127.0.0.1';
+  // Admin only when the user profile explicitly has the Administrateur role
+  const isAdmin = userProfile?.role === 'Administrateur';
 
   const handleBarcodeResult = (decodedText: string) => {
     if (barcodeScanTarget === 'new') {

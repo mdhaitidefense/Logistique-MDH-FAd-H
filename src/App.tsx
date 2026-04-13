@@ -142,18 +142,23 @@ function App() {
       if (!userEmail) { setLoading(false); return; }
 
       // 1. Get current profile from users table
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from('users')
         .select('*')
         .eq('id', userId)
         .single();
-      
-      // 2. Get pre-authorized role (case-insensitive email matching)
-      const { data: preAuth } = await supabase
+
+      if (profileError) console.warn('[Auth] users query error:', profileError.message);
+
+      // 2. Get pre-authorized role — only 'role' and 'organization' exist in this table
+      const { data: preAuth, error: preAuthError } = await supabase
         .from('pre_authorized_users')
-        .select('role, full_name, organization')
+        .select('role, organization')
         .ilike('email', userEmail.trim())
         .maybeSingle();
+
+      if (preAuthError) console.warn('[Auth] pre_authorized_users query error:', preAuthError.message);
+      console.log('[Auth] email:', userEmail, '| profile.role:', profile?.role, '| preAuth.role:', preAuth?.role);
 
       let finalProfile = profile;
 
@@ -165,7 +170,7 @@ function App() {
             id: userId,
             email: userEmail,
             role: preAuth.role,
-            full_name: profile?.full_name || preAuth.full_name || userEmail.split('@')[0],
+            full_name: profile?.full_name || userEmail.split('@')[0],
             organization: profile?.organization || preAuth.organization || 'Ministère de la Défense',
             updated_at: new Date().toISOString()
           })
@@ -176,22 +181,20 @@ function App() {
           finalProfile = updatedProfile;
         } else if (updateError) {
           // Upsert failed (RLS or other) — build profile in memory from pre_auth data
-          console.warn('Upsert failed, using pre_auth role directly:', updateError.message);
+          console.warn('[Auth] Upsert failed:', updateError.message, '— using preAuth role in memory');
           finalProfile = {
+            ...(profile || {}),
             id: userId,
             email: userEmail,
             role: preAuth.role,
-            full_name: profile?.full_name || preAuth.full_name || userEmail.split('@')[0],
+            full_name: profile?.full_name || userEmail.split('@')[0],
             organization: profile?.organization || preAuth.organization || 'Ministère de la Défense',
-            ...(profile || {}),
-            // override role from pre_auth even if profile exists
-            role: preAuth.role,
           };
         }
       }
 
       if (finalProfile) {
-        console.log('User profile loaded:', finalProfile.email, '| role:', finalProfile.role);
+        console.log('[Auth] Final role set:', finalProfile.role);
         setUserProfile(finalProfile);
         if (finalProfile.role !== 'Administrateur' && activeTab === 'user_management') {
           setActiveTab('dashboard');
@@ -202,10 +205,10 @@ function App() {
           id: userId,
           email: userEmail,
           role: preAuth.role,
-          full_name: preAuth.full_name || userEmail.split('@')[0],
+          full_name: userEmail.split('@')[0],
           organization: preAuth.organization || 'Ministère de la Défense',
         };
-        console.log('Using fallback profile from pre_auth:', fallbackProfile.role);
+        console.log('[Auth] Fallback role from preAuth:', fallbackProfile.role);
         setUserProfile(fallbackProfile as any);
       } else {
         // No profile and not pre-authorized → treat as regular user
@@ -216,7 +219,7 @@ function App() {
           full_name: userEmail.split('@')[0],
           organization: 'Ministère de la Défense',
         };
-        console.warn('No pre-auth found for:', userEmail, '— defaulting to Consultant');
+        console.warn('[Auth] No preAuth entry for:', userEmail, '→ defaulting to Consultant');
         setUserProfile(defaultProfile as any);
       }
       
